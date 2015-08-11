@@ -1,5 +1,5 @@
 #!/usr/bin/env node
 
-process.title = 'gsp';
+process.title = 'gss';
 
 require('../lib/cli');

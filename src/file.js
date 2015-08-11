@@ -1,9 +1,9 @@
 const async = require('async');
 const gspdata = require('./util/gspdata');
-const fs = require('fs-extra');
-const glob = require('glob');
 const isBinaryPath = require('is-binary-path');
 const path = require('path');
+const minimatch = require('minimatch');
+const nodegit = require('nodegit');
 
 const DEFAULT_PREPROCESSOR_CONFIG = {
     "coffee": ["coffee", "modular"],
@@ -11,14 +11,9 @@ const DEFAULT_PREPROCESSOR_CONFIG = {
     "js": ["modular"]
 };
 
-let $fileCache = {};
-
 class File {
 
     constructor(workdir, filename, config) {
-        if (filename) {
-            filename = filename.split(path.sep).join('/');
-        }
         this.workdir = workdir;
         this.filename = filename;
         this.config = config;
@@ -30,52 +25,34 @@ class File {
     }
 
     set(key, value) {
-        if (key === 'filename' && value) {
-            value = value.split(path.sep).join('/');
-        }
         this[key] = value;
     }
 
-    read(callback) {
-        let filename = path.join(this.workdir, this.filename);
-        if (fs.existsSync(filename)) {
-            let mtime = fs.statSync(filename).mtime.getTime();
-            if ($fileCache[filename]) {
-                if ($fileCache[filename].mtime === mtime) {
-                    callback(null, $fileCache[filename].content);
-                    return;
-                }
-                else {
-                    $fileCache[filename] = null;
-                }
+    readFileCommit(callback) {
+        let filename = this.filename;
+        this.workdir.getEntry(filename).then(function(entry) {
+            if (entry.isTree()) {
+                callback(new Error(filename + ' is a directory.'));
+                return;
             }
-            let filedata = fs.readFileSync(filename);
-            if (isBinaryPath(filename)) {
+            entry.getBlob().then(function(blob) {
+                callback(null, blob.content());
+            }, callback);
+        }, callback);
+    }
+
+    read(callback) {
+        this.readFileCommit((err, filedata) => {
+            if (isBinaryPath(this.filename)) {
                 this.filedata = filedata;
-                $fileCache[filename] = {
-                    content: filedata,
-                    mtime: mtime
-                };
                 callback(null, filedata);
                 return;
             }
             this.filedata = filedata.toString();
             this.preprocess((err) => {
-                if (!err) {
-                    $fileCache[filename] = {
-                        content: this.filedata,
-                        mtime: mtime
-                    };
-                }
                 callback(err, this.filedata);
             });
-        }
-        else {
-            if ($fileCache[filename]) {
-                $fileCache[filename] = null;
-            }
-            callback(new Error(filename + ' doesn\'t exist'));
-        }
+        });
     }
 
     preprocess(callback) {
@@ -199,7 +176,7 @@ class Concat extends File {
                     file = new File(this.workdir, file, this.config);
                     file.read((err, filedata) => {
                         if (!err) {
-                            filedata = `/* from ${path.join(file.workdir, file.filename)} */\n` + filedata;
+                            filedata = `/* from ${file.get('filename')} */\n` + filedata;
                         }
                         c(err, filedata);
                     });
@@ -216,16 +193,54 @@ class Concat extends File {
             callback(null, [filename]);
             return;
         }
-        callback(null, glob.sync(filename, {cwd: this.workdir}));
+        let wildcardStart = filename.indexOf('*');
+        let cwd = filename.slice(0, wildcardStart).replace(/[^\/]*$/, '');
+        let readCommitTree = function (t, callback) {
+            t.getTree().then(function (tree) {
+                if (tree.path().indexOf(cwd) === 0 || cwd.indexOf(tree.path()) === 0) {
+                    async.concatSeries(tree.entries(), function (te, cb) {
+                        if (te.isTree()) {
+                            readCommitTree(te, cb);
+                        }
+                        else {
+                            if (minimatch(te.path(), filename)) {
+                                cb(null, [te.path()]);
+                            }
+                            else {
+                                cb(null, []);
+                            }
+                        }
+                    }, callback);
+                }
+                else {
+                    callback(null, []);
+                }
+            });
+        };
+        readCommitTree(this.workdir, callback);
     }
 
     getExternalFile(repoPath, filename, callback) {
-        let config = fs.readJSONSync(path.join(repoPath, '.gspconfig'), {throws: false}) || {};
-        let file = new Concat();
-        file.set('workdir', repoPath);
-        file.set('filename', filename);
-        file.set('config', config);
-        file.read(callback);
+        nodegit.Repository.openBare(repoPath).then(function (repository) {
+            repository.getMasterCommit().then(function (commit) {
+                commit.getEntry('.gspconfig').then(function(entry) {
+                    entry.getBlob().then(function(blob) {
+                        let config;
+                        try {
+                            config = JSON.parse(blob.toString());
+                        }
+                        catch (e) {
+                            config = {};
+                        }
+                        let file = new Concat();
+                        file.set('workdir', commit);
+                        file.set('filename', filename);
+                        file.set('config', config);
+                        file.read(callback);
+                    }, callback);
+                }, callback);
+            });
+        });
     }
 }
 
