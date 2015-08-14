@@ -40,6 +40,7 @@ let routers = {
             callback(chalk.red('Authentication updated failed.'));
         }
     }
+
 };
 
 let exception = function (err, request, response) {
@@ -57,6 +58,7 @@ let exception = function (err, request, response) {
 };
 
 let start = function (options) {
+    options.port = options.port || 7070;
     let server = http.createServer();
     server.on('request', function (request, response) {
         let d = domain.create();
@@ -88,7 +90,7 @@ let start = function (options) {
             console.log('Gsp server started, listening on port %s', options.port);
         }
     });
-    server.listen(options.port || 7070);
+    server.listen(options.port);
 };
 
 exports.start = function (options) {

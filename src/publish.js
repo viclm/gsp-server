@@ -253,9 +253,11 @@ let transport = function (diffs, configs, auth, socket, globalCallback) {
                 let filecontent = diffs[filepath];
                 let absolutefilepath = path.join(dirname, path.relative(configs['publish_dir'], filepath));
                 if (filecontent === false) {
+                    socket.write('Deleting ' + filepath + '...');
                     fs.unlinkSync(absolutefilepath);
                 }
                 else {
+                    socket.write('Copying ' + filepath + '...');
                     fs.outputFileSync(absolutefilepath, filecontent);
                 }
                 c();
@@ -263,6 +265,9 @@ let transport = function (diffs, configs, auth, socket, globalCallback) {
         },
         function (callback) {
             svn.status(function (err, stdout) {
+                if (!err && !stdout) {
+                    socket.write(chalk.yellow('Files have been commited already.'));
+                }
                 callback(err, stdout);
             });
         },
@@ -392,6 +397,7 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
                     c();
                     return;
                 }
+                socket.write('Compiling ' + filename + '...');
                 let f = new file.Concat();
                 f.set('workdir', commit);
                 f.set('filename', filename);
