@@ -8,8 +8,6 @@ const upa = require('upa');
 const path = require('path');
 const publish = require('./publish').publish;
 
-//chalk.enabled = true;
-
 let routers = {
 
     publish: function (querydata, callback) {
@@ -20,7 +18,7 @@ let routers = {
     pull: function (querydata, callback) {
         let configFile = path.join(process.cwd(), 'gss.conf.js');
         require(configFile)(config);
-        let options = config.get().development_repos;
+        let options = config.get().gitrepos;
         let gitrepos = options.urls;
         if (options.url_prefix) {
             gitrepos = gitrepos.map(function (url) {
@@ -43,17 +41,17 @@ let routers = {
 
 };
 
-let exception = function (err, request, response) {
-    let query = JSON.parse(decodeURIComponent(url.parse(request.url).query));
+let exception = function (error) {
+    console.log(Date());
+    console.log(error.stack + '\n');
     try {
         let killTimer = setTimeout(function () {
             process.exit(1);
         }, 30000);
         killTimer.unref();
-        response.end(query.stack ? err.stack : err.message);
     }
     catch (e) {
-        response.end(query.stack ? err.stack : e.message);
+        console.log(e.stack);
     }
 };
 
@@ -63,8 +61,8 @@ let start = function (options) {
     server.on('request', function (request, response) {
         let d = domain.create();
         d.on('error', function (err) {
-            exception(err, request, response);
             server.close();
+            exception(err);
         });
         d.run(function () {
             let urlparts = url.parse(request.url);
@@ -77,10 +75,6 @@ let start = function (options) {
                 response.end(chalk.red('Unvalid request.'));
             }
         });
-        process.on('uncaughtException', function (err) {
-            exception(err, request, response);
-            server.close();
-        });
     });
     server.on('listening', function (err) {
         if (err) {
@@ -91,6 +85,10 @@ let start = function (options) {
         }
     });
     server.listen(options.port);
+    process.on('uncaughtException', function (err) {
+        server.close();
+        exception(err);
+    });
 };
 
 exports.start = function (options) {
@@ -115,6 +113,7 @@ exports.start = function (options) {
         forever.startDaemon('start', {
             command: 'gss',
             args: args,
+            env: {FORCE_COLOR: true},
             logFile: path.join(options.cwd, 'gss.log')
         });
     }

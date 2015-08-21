@@ -51,7 +51,6 @@ exports.configure = function () {
             else {
                 let username = upa.list()[0];
                 let password = upa.get(username);
-                let stdout;
                 let cp = child_process.spawn(
                     'svn',
                     [
@@ -65,21 +64,16 @@ exports.configure = function () {
                         cwd + '/.svnrepo'
                     ]
                 );
+                let cperror = null;
                 cp.stdout.on('data', function (chunk) {
-                    chunk = chunk.toString();
-                    process.stdout.write(chunk);
-                    stdout = chunk;
+                    process.stdout.write(chunk.toString());
                 });
                 cp.stderr.on('data', function (chunk) {
                     process.stdout.write(chunk.toString());
+                    cperror = true;
                 });
                 cp.stdout.on('end', function () {
-                    if (/\d+\.\s*$/.test(stdout)) {
-                        callback();
-                    }
-                    else {
-                        callback(true);
-                    }
+                    callback(cperror);
                 });
             }
         }

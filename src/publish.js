@@ -109,58 +109,63 @@ let getConcatConfig = function (commit, callback) {
 }
 
 let getDiff = function (commit, config, diff, callback) {
-    let concatConfigs;
-    async.waterfall([
-        function (callback) {
-            concatConfigs = gspdata.get('concat', config.id);
-            if (diff['concatfile.json'] === 1 || diff['concatfile.json'] === 3 || !concatConfigs) {
-                getConcatConfig(commit, function (err, cc) {
-                    if (!err) {
-                        concatConfigs = cc;
-                        gspdata.set('concat', config.id, cc)
+    let concatConfigs = gspdata.get('concat', config.id);
+    let getDiff = function () {
+
+        let addRfs = function (filename) {
+            if (concatConfigs.rfs[filename]) {
+                concatConfigs.rfs[filename].forEach(function (f) {
+                    if (!diff[f]) {
+                        diff[f] = 3;
+                        addRfs(f);
                     }
-                    callback(err);
                 });
             }
-            else {
-                callback();
-            }
-        },
-        function (callback) {
+        };
 
-            let addRfs = function (filename) {
-                if (concatConfigs.rfs[filename]) {
-                    concatConfigs.rfs[filename].forEach(function (f) {
-                        if (!diff[f]) {
-                            diff[f] = 3;
-                            addRfs(f);
-                        }
-                    });
-                }
-            };
-
-            Object.keys(diff).forEach(function (filename) {
-                Object.keys(concatConfigs.pkg).forEach(function (pkg) {
-                    return concatConfigs.pkg[pkg].some(function (include) {
-                        if (minimatch(filename, include)) {
-                            diff[pkg] = 3;
-                            return true;
-                        }
-                        else {
-                            return false;
-                        }
-                    });
+        Object.keys(diff).forEach(function (filename) {
+            Object.keys(concatConfigs.pkg).forEach(function (pkg) {
+                return concatConfigs.pkg[pkg].some(function (include) {
+                    if (minimatch(filename, include)) {
+                        diff[pkg] = 3;
+                        return true;
+                    }
+                    else {
+                        return false;
+                    }
                 });
             });
+        });
 
-            Object.keys(diff).forEach(addRfs);
+        Object.keys(diff).forEach(addRfs);
 
-            callback();
+        if (config['publish_dir']) {
+            Object.keys(diff).forEach(function (filename) {
+                if (!minimatch(filename, path.join(config['publish_dir'], '**'))) {
+                    delete diff[filename];
+                }
+            });
         }
 
-    ], function (err) {
-        callback(err, diff);
-    });
+        callback(null, diff);
+
+    };
+
+    if (diff['concatfile.json'] === 1 || diff['concatfile.json'] === 3 || !concatConfigs) {
+        getConcatConfig(commit, function (err, cc) {
+            if (err) {
+                callback(err);
+            }
+            else {
+                gspdata.set('concat', config.id, cc);
+                concatConfigs = cc;
+                getDiff();
+            }
+        });
+    }
+    else {
+        getDiff();
+    }
 };
 
 let getExtDiffs = function (diffs, configs) {
@@ -378,13 +383,6 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
         function (callback) {
             getDiff(commit, configs, diffs, function (err, diff) {
                 if (!err) {
-                    if (configs['publish_dir']) {
-                        Object.keys(diff).forEach(function (filename) {
-                            if (!minimatch(filename, path.join(configs['publish_dir'], '**'))) {
-                                delete diff[filename];
-                            }
-                        });
-                    }
                     diffs = diff;
                 }
                 callback(err);
@@ -404,7 +402,8 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
                 f.set('config', configs);
                 f.read(function (err, data) {
                     if (!err) {
-                        diffs[filename] = data;
+                        delete diffs[filename];
+                        diffs[f.get('filename')] = data;
                     }
                     c(err);
                 });
