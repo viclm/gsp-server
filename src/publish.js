@@ -321,7 +321,7 @@ let transport = function (diffs, configs, auth, socket, globalCallback) {
                             if (version) {
                                 version = version[1];
                                 let svndir = path.relative(base, dirname).replace('.svnrepo/', '');
-                                stdout.match(/^(?:Add|Send|Delet)ing.+$/mg).forEach(function (filename) {
+                                stdout.match(/^(?:Add|Send)ing.+$/mg).forEach(function (filename) {
                                     filename = filename.match(/\S+$/)[0];
                                     if (fs.statSync(path.join(dirname, filename)).isFile()) {
                                         socket.write('Committing ' + version + '/' + path.join(svndir, filename));
