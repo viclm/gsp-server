@@ -2,7 +2,6 @@ const async = require('async');
 const chalk = require('chalk');
 const child_process = require('child_process');
 const config = require('./util/config');
-const glob = require('glob');
 const gspdata = require('./util/gspdata');
 const fs = require('fs');
 const path = require('path');
@@ -22,7 +21,7 @@ exports.configure = function () {
             }
             console.log('Starting cloning git repositories...');
             async.eachLimit(options.gitrepos.urls, 5, function (repo, c) {
-                if (fs.existsSync(path.join(cwd, '.gitrepos', repo))) {
+                if (fs.existsSync(path.join(cwd, '.gitrepos', path.basename(repo)))) {
                     c();
                 }
                 else {
@@ -32,7 +31,7 @@ exports.configure = function () {
             }, callback);
         },
         function (callback) {
-            glob('**/*.git', {cwd: path.join(cwd, '.gitrepos')}, function (err, result) {
+            fs.readdir(path.join(cwd, '.gitrepos'), function (err, result) {
                 if (!err) {
                     let repoLocation = {};
                     result.forEach(function (repo) {
