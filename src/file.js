@@ -43,6 +43,10 @@ class File {
 
     read(callback) {
         this.readFileCommit((err, filedata) => {
+            if (err) {
+                callback(err);
+                return;
+            }
             if (isBinaryPath(this.filename)) {
                 this.filedata = filedata;
                 callback(null, filedata);

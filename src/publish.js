@@ -433,13 +433,14 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
         },
         function (callback) {
             let extDiffs = getExtDiffs(diffs, configs);
-            auth.message = 'Recompile automatically because some of the content which belongs to another repository updated\n'
+            auth.message = 'Recompile automatically because it contains content that belongs to anothor repository which has updated\n'
                             + 'repository: ' + configs.id + '\n'
                             + 'message:' + auth.message;
-            async.map(Object.keys(extDiffs), function (repoId, c) {
+            async.eachSeries(Object.keys(extDiffs), function (repoId, c) {
                 let repoLocation = gspdata.get('repositories', repoId);
                 let repoRev = gspdata.get('changeset', repoId);
                 if (repoLocation && repoRev) {
+                    socket.write(`Republish repository ${repoId} which refers files updated in this commit.`);
                     nodegit.Repository.openBare(repoLocation).then(function (externalRepo) {
                         publish(externalRepo, repoId, repoRev, extDiffs[repoId], auth, socket, function (err) {
                             if (err) {
