@@ -19,7 +19,7 @@ let compress = function (filename, filecontent, options, callback) {
     new Imagemin()
     .src(filecontent)
     .use(Imagemin[COMPRESS_ENGINE[extname]](options[extname] === true ? {} : options[extname]))
-    .optimize(function (err, file) {
+    .run(function (err, file) {
         callback(err, file && file.contents);
     });
 };

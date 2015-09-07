@@ -47,12 +47,7 @@ class File {
                 callback(err);
                 return;
             }
-            if (isBinaryPath(this.filename)) {
-                this.filedata = filedata;
-                callback(null, filedata);
-                return;
-            }
-            this.filedata = filedata.toString();
+            this.filedata = isBinaryPath(this.filename) ? filedata : filedata.toString();
             this.preprocess((err) => {
                 callback(err, this.filedata);
             });

@@ -259,13 +259,14 @@ let transport = function (diffs, configs, auth, socket, globalCallback) {
                 let absolutefilepath = path.join(dirname, path.relative(configs['publish_dir'], filepath));
                 if (filecontent === false) {
                     socket.write('Deleting ' + filepath + '...');
-                    fs.unlinkSync(absolutefilepath);
+                    fs.unlink(absolutefilepath, function() {
+                        c();
+                    });
                 }
                 else {
                     socket.write('Copying ' + filepath + '...');
-                    fs.outputFileSync(absolutefilepath, filecontent);
+                    fs.outputFile(absolutefilepath, filecontent, c);
                 }
-                c();
             }, callback);
         },
         function (callback) {
