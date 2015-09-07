@@ -125,13 +125,23 @@ let getDiff = function (commit, config, diff, callback) {
 
         Object.keys(diff).forEach(function (filename) {
             Object.keys(concatConfigs.pkg).forEach(function (pkg) {
-                return concatConfigs.pkg[pkg].some(function (include) {
-                    if (minimatch(filename, include)) {
-                        diff[pkg] = 3;
-                        return true;
+                let includeArray = [], excludeArray = [];
+                for (let include of concatConfigs.pkg[pkg]) {
+                    if (include.charAt(0) === '!') {
+                        excludeArray.push(include.slice(1));
                     }
                     else {
-                        return false;
+                        includeArray.push(include);
+                    }
+                }
+                return includeArray.some(function (include) {
+                    if (minimatch(filename, include)) {
+                        if (!excludeArray.some(function (exclude) {
+                            return minimatch(filename, exclude);
+                        })) {
+                            diff[pkg] = 3;
+                            return true;
+                        }
                     }
                 });
             });
