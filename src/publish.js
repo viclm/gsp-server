@@ -95,10 +95,23 @@ let getConcatConfig = function (commit, callback) {
             pkgArray.slice(0, index)
             .concat(pkgArray.slice(index))
             .forEach(function (pkgPathOther) {
-                c.pkg[pkgPathOther].some(function (filepath) {
-                    if (minimatch(pkgPath, filepath)) {
-                        rfs.push(pkgPathOther);
-                        return true;
+                let includeArray = [], excludeArray = [];
+                for (let include of c.pkg[pkgPathOther]) {
+                    if (include.charAt(0) === '!') {
+                        excludeArray.push(include.slice(1));
+                    }
+                    else {
+                        includeArray.push(include);
+                    }
+                }
+                includeArray.some(function (include) {
+                    if (minimatch(pkgPath, include)) {
+                        if (!excludeArray.some(function (exclude) {
+                            return minimatch(pkgPath, exclude);
+                        })) {
+                            rfs.push(pkgPathOther);
+                            return true;
+                        }
                     }
                 });
             });
