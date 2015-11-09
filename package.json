@@ -35,8 +35,7 @@
     "glob": "^5.0.10",
     "is-binary-path": "^1.0.1",
     "minimatch": "^2.0.8",
-    "nodegit": "^0.4.1",
-    "upa": "^0.1.2"
+    "nodegit": "^0.5.0"
   },
   "optionalDependencies": {
     "coffee-script": "^1.9.3",
@@ -48,7 +47,8 @@
     "grunt-babel": "^5.0.1",
     "grunt-contrib-copy": "^0.8.0",
     "grunt-contrib-watch": "^0.6.1",
-    "grunt-eslint": "^17.0.0"
+    "grunt-eslint": "^17.0.0",
+    "grunt-nodemon": "^0.4.0"
   },
   "engines": {
     "node": ">= 0.12.0"

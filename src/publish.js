@@ -8,7 +8,7 @@ const minimatch = require('minimatch');
 const net = require('net');
 const nodegit = require('nodegit');
 const path = require('path');
-const upa = require('upa');
+const gssconfig = require('./util/config');
 
 let createSocket = function (options) {
     let server = net.createServer(), timer;
@@ -45,16 +45,35 @@ let createSocket = function (options) {
 let SVN = (function () {
     let commands = ['status', 'update', 'add', 'rm', 'commit'];
     let method = function (command, args, cwd, callback) {
-        child_process.exec('svn ' + command + ' ' + args, {cwd: cwd}, callback);
+        child_process.exec(`svn ${command} ${args}`, {cwd: cwd}, callback);
     };
-    let constructor = function (cwd) {this.cwd = cwd;};
+    let constructor = function (repodir, mappingdir) {
+        this.repodir = repodir;
+        this.mappingdir = mappingdir;
+        this.publishdir = path.join(this.repodir, this.mappingdir);
+        if (!fs.existsSync(this.publishdir)) {
+            child_process.execSync('mkdir -p ' + this.publishdir);
+        }
+        this.auth = gssconfig.get('svnrepo');
+    };
     commands.forEach(function (command) {
         constructor.prototype[command] = function (args, callback) {
             if (typeof args === 'function') {
                 callback = args;
                 args = '';
             }
-            method(command, args, this.cwd, callback);
+            if (typeof args === 'object') {
+                let argsStr = '';
+                for (let arg in args) {
+                    argsStr += '--' + arg;
+                    if (args[arg] !== true) {
+                        argsStr += '=' + args[arg];
+                    }
+                }
+                args = argsStr;
+            }
+            args += ` --username "${this.auth.name}" --password "${this.auth.password}" --no-auth-cache --non-interactive`;
+            method(command, args, this.repodir, callback);
         };
     });
     return constructor;
@@ -219,67 +238,23 @@ let getExtDiffs = function (diffs, configs) {
     return externalRepos;
 };
 
-let transport = function (diffs, configs, auth, socket, globalCallback) {
-    let base = process.cwd(), dirname, svn;
+let transportToSVN = function (diffs, auth, configs, socket, globalCallback) {
+    let publishRepo = path.join(process.cwd(), '.svnrepo'), svn;
 
     async.waterfall([
         function (callback) {
             if (configs.mapping_dir) {
-                dirname = path.join(base, '.svnrepo', configs.mapping_dir);
-                svn = new SVN(dirname);
-                if (fs.existsSync(dirname)) {
-                    callback();
-                }
-                else {
-                    let mappingDir = path.join(base, '.svnrepo');
-                    async.eachSeries(configs.mapping_dir.split('/'), function (dir, c) {
-                        mappingDir = path.join(mappingDir, dir);
-                        if (!fs.existsSync(mappingDir)) {
-                            fs.mkdirSync(mappingDir);
-                            child_process.exec('svn add ' + mappingDir, function () {
-                                child_process.exec('svn ci -m "create gsp mapping directory" ' + auth.svnauth + ' ' + mappingDir, function (err) {
-                                    if (err) {
-                                        err = err.message.trim().match(/[^\n]+$/)[0];
-                                        if (err.indexOf('E170001') > -1) {
-                                            err = new Error('svn: authentication failed for ' + auth.author);
-                                        }
-                                        else {
-                                            err = new Error(err);
-                                        }
-                                        fs.rmdirSync(mappingDir);
-                                    }
-                                    c(err);
-                                });
-                            });
-                        }
-                        else {
-                            c();
-                        }
-                    }, callback);
-                }
+                svn = new SVN(publishRepo, configs.mapping_dir);
+                callback();
             }
             else {
                 callback(new Error('mapping_dir is not configed.'));
             }
         },
         function (callback) {
-            svn.update(auth.svnauth, function (err) {
-                if (err) {
-                    err = err.message.trim().match(/[^\n]+$/)[0];
-                    if (err.indexOf('E170001') > -1) {
-                        err = new Error('svn: authentication failed for ' + auth.author);
-                    }
-                    else {
-                        err = new Error(err);
-                    }
-                }
-                callback(err);
-            });
-        },
-        function (callback) {
             async.each(Object.keys(diffs), function (filepath, c) {
                 let filecontent = diffs[filepath];
-                let absolutefilepath = path.join(dirname, path.relative(configs['publish_dir'], filepath));
+                let absolutefilepath = path.join(svn.publishdir, path.relative(configs['publish_dir'], filepath));
                 if (filecontent === false) {
                     socket.write('Deleting ' + filepath + '...');
                     fs.unlink(absolutefilepath, function() {
@@ -324,39 +299,103 @@ let transport = function (diffs, configs, auth, socket, globalCallback) {
                         }
                     });
                 }
-            }, function (err) {
+            }, callback);
+        },
+        function (callback) {
+            svn.commit(`-m "Author: ${auth.name}<${auth.email}>\n${auth.message}"`, function (err, stdout) {
                 if (err) {
                     callback(err);
                 }
                 else {
-                    svn.commit('-m "' + auth.message + '" ' + auth.svnauth, function (err, stdout) {
-                        if (err) {
-                            err = err.message.trim().match(/[^\n]+$/)[0];
-                            if (err.indexOf('E170001') > -1) {
-                                err = new Error('svn: authentication failed for ' + auth.author);
+                    let version = /\s(\d+)\D*$/.exec(stdout);
+                    if (version) {
+                        version = version[1];
+                        stdout.match(/^(?:Add|Send)ing.+$/mg).forEach(function (filename) {
+                            filename = filename.match(/\S+$/)[0];
+                            if (fs.statSync(path.join(publishRepo, filename)).isFile()) {
+                                socket.write('Committing ' + version + '/' + filename);
                             }
-                            else {
-                                err = new Error(err);
-                            }
-                            callback(err);
-                        }
-                        else {
-                            let version = /\s(\d+)\D*$/.exec(stdout);
-                            if (version) {
-                                version = version[1];
-                                let svndir = path.relative(base, dirname).replace('.svnrepo/', '');
-                                stdout.match(/^(?:Add|Send)ing.+$/mg).forEach(function (filename) {
-                                    filename = filename.match(/\S+$/)[0];
-                                    if (fs.statSync(path.join(dirname, filename)).isFile()) {
-                                        socket.write('Committing ' + version + '/' + path.join(svndir, filename));
-                                    }
-                                });
-                            }
-                            callback();
-                        }
-                    });
+                        });
+                    }
+                    callback();
                 }
             });
+        }
+    ], globalCallback);
+};
+
+let transportToGit = function (diffs, auth, configs, socket, globalCallback) {
+    let publishRepo = path.join(process.cwd(), '.svnrepo'),
+        publishConfig = gssconfig.get('svnrepo'), repository;
+
+    async.waterfall([
+        function (callback) {
+            if (configs.mapping_dir) {
+                if (!fs.existsSync(path.join(publishRepo, configs.mapping_dir))) {
+                    child_process.execSync('mkdir -p ' + path.join(publishRepo, configs.mapping_dir));
+                }
+                callback();
+            }
+            else {
+                callback(new Error('mapping_dir is not configed.'));
+            }
+        },
+        function (callback) {
+            async.each(Object.keys(diffs), function (filepath, c) {
+                let filecontent = diffs[filepath];
+                let absolutefilepath = path.join(publishRepo, configs.mapping_dir, path.relative(configs['publish_dir'], filepath));
+                if (filecontent === false) {
+                    socket.write('Deleting ' + filepath + '...');
+                    fs.unlink(absolutefilepath, function() {
+                        c();
+                    });
+                }
+                else {
+                    socket.write('Copying ' + filepath + '...');
+                    fs.outputFile(absolutefilepath, filecontent, c);
+                }
+            }, callback);
+        },
+        function (callback) {
+            nodegit.Repository.open(publishRepo).then(function (r) {
+                repository = r;
+                callback();
+            }, callback);
+        },
+        function (callback) {
+            repository.getStatus().then(function (status) {
+                status = status.map(function (file) {
+                    socket.write('Committing ' + file.path());
+                    return file.path();
+                });
+                if (status.length) {
+                    let author = nodegit.Signature.now(auth.name, auth.email);
+                    let committer = nodegit.Signature.now(publishConfig.name, publishConfig.email);
+                    repository.createCommitOnHead(status, author, committer, auth.message).then(function (oid) {
+                        callback(null, oid.toString());
+                    }, callback);
+                }
+                else {
+                    callback(null, null);
+                }
+            }, callback);
+        },
+        function (oid, callback) {
+            if (oid) {
+                child_process.exec('git push origin master', {cwd: publishRepo}, function (err) {
+                    if (err) {
+                        callback(err);
+                    }
+                    else {
+                        socket.write('Commited ' + oid);
+                        callback();
+                    }
+                });
+            }
+            else {
+                socket.write(chalk.yellow('Files have been commited already.'));
+                callback();
+            }
         }
     ], globalCallback);
 };
@@ -395,13 +434,15 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
             }
             commit.getDiff().then(function (diffList) {
                 diffs = {};
-                diffList.forEach(function (diff) {
-                    diff.patches().forEach(function (cp) {
-                        // 1:add 2:delete 3:modify
-                        diffs[cp.newFile().path()] = cp.status();
+                async.each(diffList, function (diff, callback) {
+                    diff.patches().then(function (arrayConvenientPatch) {
+                        arrayConvenientPatch.forEach(function (cp) {
+                            // 1:add 2:delete 3:modify
+                            diffs[cp.newFile().path()] = cp.status();
+                        });
+                        callback();
                     });
-                });
-                callback();
+                }, callback);
             });
         },
         function (callback) {
@@ -434,26 +475,23 @@ let publish = function (repo, repoId, repoRev, diffs, auth, socket, globalCallba
             }, callback);
         },
         function (callback) {
-            if (typeof auth === 'object') {
-                callback();
-                return;
+            if (!auth) {
+                auth = {
+                    name: commit.author().name(),
+                    email: commit.author().email(),
+                    message: commit.message()
+                };
             }
-            let message = commit.message();
-            if (auth) {
-                message += '\n\nWarning: author for this commit has been rewrited, the orignal author is ' + commit.committer().name();
+            let publishConfig = gssconfig.get('svnrepo');
+            if (publishConfig.type === 'svn') {
+                transportToSVN(diffs, auth, configs, socket, callback);
+            }
+            else if (publishConfig.type === 'git') {
+                transportToGit(diffs, auth, configs, socket, callback);
             }
             else {
-                auth = commit.committer().name();
+                callback(new Error('Wrong type of publish repository.'));
             }
-            auth = {
-                author: auth,
-                message: message,
-                svnauth: '--username "' + auth + '" --password "' + upa.get(auth) + '" --no-auth-cache --non-interactive'
-            };
-            callback();
-        },
-        function (callback) {
-            transport(diffs, configs, auth, socket, callback);
         },
         function (callback) {
             let extDiffs = getExtDiffs(diffs, configs);
@@ -527,7 +565,7 @@ exports.publish = function (options) {
                     nodegit.Repository.openBare(repoLocation).then(function (repository) {
                         async.eachSeries(revlist, function (rev, callback) {
                             socket.write('Publish changeset ' + rev.slice(0, 7));
-                            publish(repository, options.repo, rev, null, options.author, socket, function (err) {
+                            publish(repository, options.repo, rev, null, null, socket, function (err) {
                                 if (err) {
                                     socket.write(chalk.red(err.message));
                                 }

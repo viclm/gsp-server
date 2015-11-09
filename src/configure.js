@@ -5,11 +5,10 @@ const config = require('./util/config');
 const gspdata = require('./util/gspdata');
 const fs = require('fs');
 const path = require('path');
-const upa = require('upa');
+const nodegit = require('nodegit');
 
 exports.configure = function () {
     let cwd = process.cwd();
-    require(cwd + '/gss.conf.js')(config);
     let options = config.get();
 
     console.log('Configuring...');
@@ -43,37 +42,47 @@ exports.configure = function () {
             });
         },
         function (callback) {
-            console.log('Starting cloning subversion repository...');
+            console.log('Starting cloning publish repository...');
             if (fs.existsSync(path.join(cwd, '.svnrepo'))) {
                 callback();
             }
             else {
-                let username = upa.list()[0];
-                let password = upa.get(username);
-                let cp = child_process.spawn(
-                    'svn',
-                    [
-                        'co',
-                        options.svnrepo.url,
-                        '--username',
-                        username,
-                        '--password',
-                        password,
-                        '--non-interactive',
-                        cwd + '/.svnrepo'
-                    ]
-                );
-                let cperror = null;
-                cp.stdout.on('data', function (chunk) {
-                    process.stdout.write(chunk.toString());
-                });
-                cp.stderr.on('data', function (chunk) {
-                    process.stdout.write(chunk.toString());
-                    cperror = true;
-                });
-                cp.stdout.on('end', function () {
-                    callback(cperror);
-                });
+                if (options.svnrepo.type === 'svn') {
+                    let cp = child_process.spawn(
+                        'svn',
+                        [
+                            'co',
+                            options.svnrepo.url,
+                            '--username',
+                            options.svnrepo.name,
+                            '--password',
+                            options.svnrepo.password,
+                            '--non-interactive',
+                            cwd + '/.svnrepo'
+                        ]
+                    );
+                    let cperror = null;
+                    cp.stdout.on('data', function (chunk) {
+                        process.stdout.write(chunk.toString());
+                    });
+                    cp.stderr.on('data', function (chunk) {
+                        process.stdout.write(chunk.toString());
+                        cperror = true;
+                    });
+                    cp.stdout.on('end', function () {
+                        callback(cperror);
+                    });
+                }
+                else if (options.svnrepo.type === 'git') {
+                    nodegit.Clone.clone(options.svnrepo.url, cwd + '/.svnrepo').then(function () {
+                        console.log('Clone finished.');
+                        callback();
+                    }, callback);
+                }
+                else {
+                    console.log(chalk.red('Wrong type of publish repository.'));
+                    callback(true);
+                }
             }
         }
     ],

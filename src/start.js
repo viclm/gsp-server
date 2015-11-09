@@ -4,7 +4,6 @@ const domain = require('domain');
 const forever = require('forever');
 const http = require('http');
 const url = require('url');
-const upa = require('upa');
 const path = require('path');
 const publish = require('./publish').publish;
 
@@ -16,9 +15,7 @@ let routers = {
     },
 
     pull: function (querydata, callback) {
-        let configFile = path.join(process.cwd(), 'gss.conf.js');
-        require(configFile)(config);
-        let options = config.get().gitrepos;
+        let options = config.get('gitrepos');
         let gitrepos = options.urls;
         if (options.url_prefix) {
             gitrepos = gitrepos.map(function (url) {
@@ -26,17 +23,6 @@ let routers = {
             });
         }
         callback(JSON.stringify(gitrepos));
-        delete require.cache[configFile];
-    },
-
-    auth: function (querydata, callback) {
-        upa.set(querydata.username, querydata.password);
-        if (upa.get(querydata.username)) {
-            callback(chalk.green('Authentication updated successfuly.'));
-        }
-        else {
-            callback(chalk.red('Authentication updated failed.'));
-        }
     }
 
 };
